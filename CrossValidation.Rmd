@@ -1,0 +1,142 @@
+---
+title: "Crossvalidation"
+output: html_document
+date: "2025-11-11"
+---
+
+---
+title: "CrossValidation"
+output: html_document
+date: "2025-11-11"
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+library(modelr)
+
+```
+
+```{r}
+data("lidar")
+```
+
+
+Look at the data:
+```{r}
+lidar
+
+lidar_df =
+  lidar |>
+  mutate(id = row_number())
+
+lidar_df |>
+  ggplot(aes(x = range, y = logratio)) + 
+  geom_point()
+```
+
+## create dataframes 
+```{r}
+train_df =
+  sample_frac(lidar_df, size = .8) |>
+  arrange(id)
+
+test_df = anti_join(lidar_df, train_df, by = "id")
+```
+
+```{r}
+ggplot(train_df, aes(x = range, y = logratio)) + 
+  geom_point() +
+  geom_point(data = test_df, color = "red")
+```
+
+```{r}
+linear_mod = lm(logratio ~ range, data = train_df)
+smooth_mod = mgcv::gam(logratio ~ s(range, k =30), sp = 10e-6, data = train_df)
+```
+
+
+```{r}
+train_df |>
+  add_predictions(linear_mod) |>
+  ggplot(aes(x = range, y = logratio)) +
+  geom_point() +
+  geom_line(aes(y = pred), color = "red")
+```
+
+
+```{r}
+train_df |> 
+  add_predictions(smooth_mod) |> 
+  ggplot(aes(x = range, y = logratio)) + 
+  geom_point() + 
+  geom_line(aes(y = pred), color = "red")
+```
+
+## Compute RMSEs
+```{r}
+rmse(linear_mod, test_df)
+rmse(smooth_mod, test_df)
+```
+
+
+```{r}
+cv_df = 
+  crossv_mc(lidar_df, 100) 
+
+cv_df |> pull(train) |> nth(1) |> as_tibble()
+
+cv_df |> pull(test) |> nth(1) |> as_tibble()
+```
+
+
+Iterate 
+```{r}
+cv_df =
+  cv_df |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+```
+
+Did it work:
+```{r}
+cv_df |> pull(train) |> nth(3)
+```
+
+Fit models over
+```{r}
+cv_df = 
+cv_df |>
+  mutate(
+    linear_fits = map(train, \(df) lm(logratio ~ range, data = df)),
+    smooth_fits = map(train, \(df) mgcv::gam(logratio ~ s(range), data = df)),
+    wiggly_fits = map(train, \(df) mgcv::gam(logratio ~ s(range, k =50), sp = 10e-8, data = df))
+  ) |>
+  mutate(
+    rmse_linear = map2_dbl(linear_fits, test, rmse),
+    rmse_smooth = map2_dbl(smooth_fits, test, rmse),
+    rmse_wiggly = map2_dbl(wiggly_fits, test, rmse)
+  )
+```
+
+
+```{r}
+cv_df |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+
+
+
+
+
+
+
